@@ -44,18 +44,63 @@ def risk_gate():
     return True, ""
 
 def record_result(deals_since_last=None):
-    """Call each loop: sync realized P/L from broker history into risk state."""
+    """Call each loop: sync broker history into risk state + CSV.
+    Logs every closed trade (SL/TP/manual/reversal) exactly once."""
     global _daily_pnl, _last_loss_time
     now = datetime.now()
     start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     deals = mt5.history_deals_get(start, now) or []
-    pnl = sum(d.profit for d in deals
-              if d.entry == 1 and d.magic in (0, 123456) and d.symbol in SYMBOLS)
+    exits = [d for d in deals if d.entry == 1 and d.symbol in SYMBOLS
+             and d.magic in (0, 123456)]
+    pnl = sum(d.profit for d in exits)
     _daily_pnl = pnl
-    losses = [d for d in deals if d.entry == 1 and d.profit < 0 and d.symbol in SYMBOLS
-              and d.magic in (0, 123456)]
+    losses = [d for d in exits if d.profit < 0]
     if losses:
         _last_loss_time = datetime.fromtimestamp(max(d.time for d in losses))
+    _sync_log(exits)
+
+def _load_logged_tickets():
+    seen = set()
+    if not os.path.exists(LOG_FILE):
+        return seen
+    try:
+        with open(LOG_FILE, newline="") as f:
+            for row in csv.reader(f):
+                if row and row[0].isdigit():
+                    seen.add(int(row[0]))
+    except OSError:
+        pass
+    return seen
+
+def _sync_log(exits):
+    """Append broker closes to trades.csv once per deal ticket."""
+    known = _load_logged_tickets()
+    rows = []
+    for d in exits:
+        if d.ticket in known:
+            continue
+        rows.append(d)
+    if not rows:
+        return
+    if not os.path.exists(LOG_FILE):
+        with open(LOG_FILE, "a", newline="") as f:
+            csv.writer(f).writerow(
+                ["ticket", "close_time", "symbol", "dir", "entry", "close_profit", "reason"])
+    with open(LOG_FILE, "a", newline="") as f:
+        w = csv.writer(f)
+        for d in rows:
+            pos_type = "BUY" if d.type == mt5.DEAL_TYPE_BUY else "SELL"
+            reason = "sl" if "sl" in (d.comment or "") else ("tp" if "tp" in (d.comment or "") else "reversal/manual")
+            entry = None
+            try:
+                pos = mt5.history_orders_get(pos_ticket=d.position_id) if hasattr(d, "position_id") else None
+            except Exception:
+                pos = None
+            w.writerow([d.ticket,
+                        datetime.fromtimestamp(d.time).strftime("%Y-%m-%d %H:%M:%S"),
+                        d.symbol, pos_type, d.price,
+                        f"{d.profit:.2f}", reason])
+        print(f"CSV: logged {len(rows)} closed trade(s)")
 
 def update_trailing_stops():
     """Move SL to lock in profit once a trade is up TRAIL_START.

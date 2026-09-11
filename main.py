@@ -2,7 +2,7 @@ import time
 import schedule
 import MetaTrader5 as mt5
 from strategy import check_signal, market_state
-from trader import place_order, update_trailing_stops, set_symbols, check_reversal_exit, record_result
+from trader import place_order, update_trailing_stops, set_symbols, check_reversal_exit, record_result, risk_gate
 from llm_brain import review_market
 
 SYMBOL = "XAUUSDm"
@@ -33,6 +33,9 @@ def run_loop():
                     if ms:
                         mode = "CHOPPY-skip" if ms["choppy"] else f"trend={ms['trend']}"
                         pos_txt = f" | {mode} gap={ms['spread']:.3f} atr={ms['atr']:.3f}"
+                    ok, block_reason = risk_gate()
+                    if not ok:
+                        pos_txt = f" | IDLE: {block_reason}"
                 print(f"[{time.strftime('%H:%M:%S')}] {SYMBOL} bid={tick.bid} ask={tick.ask} open={len(positions)}{pos_txt}")
                 update_trailing_stops()
                 check_reversal_exit()
