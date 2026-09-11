@@ -1,0 +1,7 @@
+symbol: XAUUSD
+loop_seconds: 60
+lot_size: 0.01
+sl_points: 200
+tp_points: 400
+max_positions: 1
+llm_review_interval_hours: 1
