@@ -40,14 +40,13 @@ def current_trend(symbol):
     return s["trend"] if s else None
 
 def check_signal(symbol):
-    """Signal only on a FRESH crossover: previous M15 bar had no trend
-    (inside the choppy/no-trade zone), current bar has one."""
+    """Signal only on a FRESH crossover: previous bar was in a different
+    regime (choppy/dead zone OR opposite trend), current bar is tradeable."""
     s = market_state(symbol)
     if s is None or s["trend"] is None or s["choppy"]:
         return None
-    # was the previous bar inside the dead zone?
-    rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M15, 0, 51)
-    if rates is None or len(rates) < 51:
+    rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M15, 0, 101)
+    if rates is None or len(rates) < 101:
         return None
     prev_rates = rates[:-1]
     fast_p = sma(prev_rates, 20)
@@ -57,6 +56,7 @@ def check_signal(symbol):
     prev_spread = fast_p - slow_p
     prev_trend = "BUY" if prev_spread > 0 else ("SELL" if prev_spread < 0 else None)
     was_choppy = abs(prev_spread) < CHOPPY_FACTOR * s["atr"]
-    if was_choppy or prev_trend is None or prev_trend == s["trend"]:
+    fresh = was_choppy or prev_trend != s["trend"]
+    if not fresh:
         return None
     return {"action": s["trend"], "symbol": symbol, "fresh_crossover": True}
